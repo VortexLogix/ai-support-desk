@@ -1,0 +1,9 @@
+<Solution>
+  <Folder Name="/src/" />
+  <Folder Name="/src/api/">
+    <Project Path="src/api/AiSupportDesk.Api.csproj" />
+  </Folder>
+  <Folder Name="/src/functions/">
+    <Project Path="src/functions/AiSupportDesk.Functions.csproj" />
+  </Folder>
+</Solution>

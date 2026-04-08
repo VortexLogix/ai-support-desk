@@ -1,0 +1,28 @@
+# .NET
+bin/
+obj/
+*.user
+*.suo
+.vs/
+
+# EF Migrations - keep the folder but ignore temp
+# (migrations are committed)
+
+# Secrets — never commit real secrets
+src/api/appsettings.*.json
+!src/api/appsettings.json
+!src/api/appsettings.Development.json
+
+# Functions local settings (has real keys in dev)
+src/functions/local.settings.json
+
+# Node
+node_modules/
+src/frontend/dist/
+
+# Build outputs
+publish/
+
+# OS
+.DS_Store
+Thumbs.db

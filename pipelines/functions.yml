@@ -1,0 +1,87 @@
+trigger:
+  branches:
+    include: [main]
+  paths:
+    include: [src/functions/**]
+
+pr:
+  paths:
+    include: [src/functions/**]
+
+variables:
+  buildConfiguration: 'Release'
+  azureServiceConnection: 'AzureServiceConnection'
+  functionAppName: 'aisd-$(environment)-fn-$(resourceSuffix)'
+
+stages:
+  - stage: Build
+    displayName: 'Build & Test Functions'
+    jobs:
+      - job: BuildAndTest
+        displayName: 'dotnet build + test'
+        pool:
+          vmImage: ubuntu-latest
+        steps:
+          - task: UseDotNet@2
+            displayName: 'Use .NET 10'
+            inputs:
+              packageType: sdk
+              version: '10.x'
+
+          - task: DotNetCoreCLI@2
+            displayName: 'dotnet restore'
+            inputs:
+              command: restore
+              projects: 'src/functions/**/*.csproj'
+
+          - task: DotNetCoreCLI@2
+            displayName: 'dotnet build'
+            inputs:
+              command: build
+              projects: 'src/functions/**/*.csproj'
+              arguments: '--configuration $(buildConfiguration) --no-restore'
+
+          - task: DotNetCoreCLI@2
+            displayName: 'dotnet test'
+            inputs:
+              command: test
+              projects: 'tests/functions/**/*.csproj'
+              arguments: '--configuration $(buildConfiguration) --no-build --collect:"XPlat Code Coverage"'
+            continueOnError: false
+
+          - task: DotNetCoreCLI@2
+            displayName: 'dotnet publish'
+            inputs:
+              command: publish
+              projects: 'src/functions/**/*.csproj'
+              arguments: '--configuration $(buildConfiguration) --no-build --output $(Build.ArtifactStagingDirectory)/functions'
+              zipAfterPublish: true
+
+          - task: PublishBuildArtifacts@1
+            displayName: 'Publish Functions artifact'
+            inputs:
+              pathToPublish: $(Build.ArtifactStagingDirectory)/functions
+              artifactName: functions-drop
+
+  - stage: Deploy
+    displayName: 'Deploy Functions'
+    dependsOn: Build
+    condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
+    jobs:
+      - deployment: DeployFunctions
+        displayName: 'Deploy to Function App'
+        environment: $(environment)
+        pool:
+          vmImage: ubuntu-latest
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - task: AzureFunctionApp@2
+                  displayName: 'Deploy to Azure Function App'
+                  inputs:
+                    azureSubscription: $(azureServiceConnection)
+                    appType: functionAppLinux
+                    appName: $(functionAppName)
+                    package: '$(Pipeline.Workspace)/functions-drop/**/*.zip'
+                    runtimeStack: 'DOTNET-ISOLATED|10.0'
