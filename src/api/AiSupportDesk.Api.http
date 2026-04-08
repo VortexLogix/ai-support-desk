@@ -1,6 +1,53 @@
-@AiSupportDesk.Api_HostAddress = http://localhost:5293
+@baseUrl = http://localhost:5293
+@adminToken = 
+@userToken = 
 
-GET {{AiSupportDesk.Api_HostAddress}}/weatherforecast/
-Accept: application/json
+### Login as user (alice / Password1!)
+POST {{baseUrl}}/auth/login
+Content-Type: application/json
 
-###
+{
+  "username": "alice",
+  "password": "Password1!"
+}
+
+### Login as admin (admin / Admin123!)
+POST {{baseUrl}}/auth/login
+Content-Type: application/json
+
+{
+  "username": "admin",
+  "password": "Admin123!"
+}
+
+### Submit a ticket (paste userToken above first)
+POST {{baseUrl}}/tickets
+Content-Type: application/json
+Authorization: Bearer {{userToken}}
+
+{
+  "title": "Cannot access my account",
+  "description": "I have been locked out of my account since yesterday. I tried resetting my password but never received the email."
+}
+
+### List my tickets
+GET {{baseUrl}}/tickets
+Authorization: Bearer {{userToken}}
+
+### Get ticket by ID (replace {id})
+GET {{baseUrl}}/tickets/{id}
+Authorization: Bearer {{userToken}}
+
+### Admin: list all tickets
+GET {{baseUrl}}/tickets
+Authorization: Bearer {{adminToken}}
+
+### Admin: approve & resolve a ticket (replace {id})
+PATCH {{baseUrl}}/tickets/{id}
+Content-Type: application/json
+Authorization: Bearer {{adminToken}}
+
+{
+  "approvedReply": "Thank you for reaching out. Your account has been unlocked. Please try logging in again.",
+  "resolve": true
+}

@@ -23,6 +23,11 @@ src/frontend/dist/
 # Build outputs
 publish/
 
+# SQLite local dev database
+*.db
+*.db-shm
+*.db-wal
+
 # OS
 .DS_Store
 Thumbs.db

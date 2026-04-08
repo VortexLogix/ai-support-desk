@@ -6,14 +6,24 @@ using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 
-var builder = WebApplication.CreateBuilder(args);
+var builder = WebApplication.CreateBuilder(new WebApplicationOptions
+{
+    Args = args,
+    // Ensures config files are found from the bin folder when running the DLL directly
+    ContentRootPath = AppContext.BaseDirectory,
+});
 
 // ── Database ─────────────────────────────────────────────────────────────────
 builder.Services.AddDbContext<TicketsDbContext>(options =>
-    options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection")));
+{
+    if (builder.Environment.IsDevelopment())
+        options.UseSqlite(builder.Configuration.GetConnectionString("DefaultConnection"));
+    else
+        options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection"));
+});
 
-// ── Service Bus ───────────────────────────────────────────────────────────────
-builder.Services.AddSingleton(sp =>
+// ── Service Bus ─────────────────────────────────────────────────────────────
+builder.Services.AddSingleton(_ =>
     new ServiceBusClient(builder.Configuration.GetConnectionString("ServiceBus")));
 
 // ── JWT Auth ──────────────────────────────────────────────────────────────────
@@ -46,8 +56,9 @@ builder.Services.AddCors(options =>
               .AllowAnyHeader()
               .AllowAnyMethod()));
 
-// ── App Insights ──────────────────────────────────────────────────────────────
-builder.Services.AddApplicationInsightsTelemetry();
+// ── App Insights (only when connection string is configured) ──────────────────
+if (!string.IsNullOrEmpty(builder.Configuration["APPLICATIONINSIGHTS_CONNECTION_STRING"]))
+    builder.Services.AddApplicationInsightsTelemetry();
 
 var app = builder.Build();
 
