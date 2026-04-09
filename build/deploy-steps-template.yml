@@ -1,0 +1,126 @@
+# ──────────────────────────────────────────────────────────────────────────────
+# Deploy Steps Template — AI Support Desk
+# Reusable: provision infra via Bicep ▸ deploy selected components
+# Called by Dev / CI / CD pipelines with environment-specific parameters
+# ──────────────────────────────────────────────────────────────────────────────
+
+parameters:
+  - name: taskAzureResourceManagerConnection
+    type: string
+    default: ''
+  - name: taskResourceGroupName
+    type: string
+    default: ''
+  - name: taskEnvironment
+    type: string
+    default: 'dev'
+  - name: sqlAdminPassword
+    type: string
+    default: ''
+  - name: jwtSecret
+    type: string
+    default: ''
+  - name: deployInfra
+    type: boolean
+    default: true
+  - name: deployApi
+    type: boolean
+    default: true
+  - name: deployFunctions
+    type: boolean
+    default: true
+  - name: deployFrontend
+    type: boolean
+    default: true
+  - name: deleteAzureResources
+    type: string
+    default: 'No'
+
+steps:
+
+  # ── 1. Timestamp for unique deployment names ──────────────────────────────
+  - pwsh: |
+      Write-Host "##vso[task.setvariable variable=dateTimestamp]$(Get-Date -Format yyyyMMddTHHmmss)"
+    displayName: 'Set date timestamp variable'
+
+  # ── 2. Derive resource names from RG naming convention ────────────────────
+  - pwsh: |
+      $rg = '${{ parameters.taskResourceGroupName }}'
+      $parts = $rg -split '-'
+      $prefix = "$($parts[0])-$($parts[1])-$($parts[2])"
+      Write-Host "##vso[task.setvariable variable=functionAppName]$prefix-fn"
+      Write-Host "##vso[task.setvariable variable=webAppName]$prefix-api"
+      Write-Host "##vso[task.setvariable variable=staticWebAppName]$prefix-swa"
+      Write-Host "Resource naming prefix: $prefix"
+    displayName: 'Derive resource names'
+
+  # ── 3. Deploy Bicep (infra/main.bicep + bicepparam) ───────────────────────
+  - task: AzureCLI@2
+    displayName: 'Deploy Bicep (${{ parameters.taskEnvironment }})'
+    condition: eq('${{ parameters.deployInfra }}', 'True')
+    inputs:
+      azureSubscription: ${{ parameters.taskAzureResourceManagerConnection }}
+      scriptType: bash
+      scriptLocation: inlineScript
+      inlineScript: |
+        az deployment group create \
+          --resource-group ${{ parameters.taskResourceGroupName }} \
+          --template-file $(Pipeline.Workspace)/drop/infra/main.bicep \
+          --parameters $(Pipeline.Workspace)/drop/infra/env/${{ parameters.taskEnvironment }}.bicepparam \
+            sqlAdminPassword="${{ parameters.sqlAdminPassword }}" \
+            jwtSecret="${{ parameters.jwtSecret }}" \
+          --name "deploy-$(dateTimestamp)"
+
+  # ── 4. Deploy Function App ────────────────────────────────────────────────
+  - task: AzureFunctionApp@2
+    displayName: 'Deploy AiSupportDesk Functions'
+    condition: eq('${{ parameters.deployFunctions }}', 'True')
+    inputs:
+      azureSubscription: ${{ parameters.taskAzureResourceManagerConnection }}
+      appType: functionAppLinux
+      appName: '$(functionAppName)'
+      package: '$(Pipeline.Workspace)/drop/AiSupportDesk.Functions/**/*.zip'
+      runtimeStack: 'DOTNET-ISOLATED|10.0'
+
+  # ── 5. Deploy API to App Service ─────────────────────────────────────────
+  - task: AzureWebApp@1
+    displayName: 'Deploy AiSupportDesk API'
+    condition: eq('${{ parameters.deployApi }}', 'True')
+    inputs:
+      azureSubscription: ${{ parameters.taskAzureResourceManagerConnection }}
+      appType: webAppLinux
+      appName: '$(webAppName)'
+      package: '$(Pipeline.Workspace)/drop/AiSupportDesk.Api/**/*.zip'
+      runtimeStack: 'DOTNETCORE|10.0'
+
+  # ── 6. Deploy Frontend to Static Web App ─────────────────────────────────
+  - task: AzureCLI@2
+    displayName: 'Deploy Frontend to Static Web App'
+    condition: eq('${{ parameters.deployFrontend }}', 'True')
+    inputs:
+      azureSubscription: ${{ parameters.taskAzureResourceManagerConnection }}
+      scriptType: bash
+      scriptLocation: inlineScript
+      inlineScript: |
+        TOKEN=$(az staticwebapp secrets list \
+          --name "$(staticWebAppName)" \
+          --resource-group ${{ parameters.taskResourceGroupName }} \
+          --query "properties.apiKey" -o tsv)
+        npm install -g @azure/static-web-apps-cli
+        swa deploy $(Pipeline.Workspace)/drop/frontend-dist \
+          --deployment-token "$TOKEN" \
+          --env production
+
+  # ── 7. Delete Azure Resources (optional) ─────────────────────────────────
+  - task: AzurePowerShell@5
+    displayName: 'Delete Azure Resources'
+    condition: eq('${{ parameters.deleteAzureResources }}', 'Yes')
+    inputs:
+      azureSubscription: ${{ parameters.taskAzureResourceManagerConnection }}
+      scriptType: 'FilePath'
+      ScriptPath: '$(Pipeline.Workspace)/drop/scripts/Delete-AzureResource.ps1'
+      ScriptArguments: >
+        -ResourceGroupName ${{ parameters.taskResourceGroupName }}
+      pwsh: true
+      azurePowerShellVersion: latestVersion
+      ErrorActionPreference: 'stop'

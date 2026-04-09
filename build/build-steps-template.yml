@@ -1,0 +1,112 @@
+# ──────────────────────────────────────────────────────────────────────────────
+# Build Steps Template — AI Support Desk
+# Reusable: restore, build, test, publish artifacts
+# Called by Dev / CI / CD pipelines
+# ──────────────────────────────────────────────────────────────────────────────
+
+steps:
+
+  # ── 1. NuGet CLI ───────────────────────────────────────────────────────────
+  - task: NuGetToolInstaller@1
+    displayName: 'Install NuGet CLI'
+
+  # ── 2. NuGet Restore ──────────────────────────────────────────────────────
+  - task: NuGetCommand@2
+    displayName: 'NuGet Restore'
+    inputs:
+      command: restore
+      restoreSolution: '$(System.DefaultWorkingDirectory)\AiSupportDesk.slnx'
+      feedsToUse: config
+      nugetConfigPath: '$(System.DefaultWorkingDirectory)\NuGet.config'
+
+  # ── 3. Build Solution ─────────────────────────────────────────────────────
+  - task: VSBuild@1
+    displayName: 'Build Solution'
+    inputs:
+      solution: '$(solution)'
+      platform: '$(buildPlatform)'
+      configuration: '$(buildConfiguration)'
+      maximumCpuCount: true
+      msbuildArchitecture: x64
+      msbuildArgs: '/p:RestorePackages=false /p:IncrementalBuild=true'
+
+  # ── 4. Run Unit Tests ─────────────────────────────────────────────────────
+  - task: DotNetCoreCLI@2
+    displayName: 'Run Unit Tests'
+    inputs:
+      command: test
+      projects: 'src/**/AiSupportDesk.Tests/*.csproj'
+      arguments: >-
+        --configuration $(buildConfiguration)
+        --no-build
+        --collect "XPlat Code Coverage"
+        --blame
+        --blame-hang-timeout 60s
+        --blame-crash
+    continueOnError: false
+
+  # ── 5. Publish Code Coverage ──────────────────────────────────────────────
+  - task: PublishCodeCoverageResults@2
+    displayName: 'Publish Code Coverage'
+    inputs:
+      summaryFileLocation: '$(Agent.TempDirectory)/**/coverage.cobertura.xml'
+    condition: succeededOrFailed()
+
+  # ── 6. Publish Function App ───────────────────────────────────────────────
+  - task: DotNetCoreCLI@2
+    displayName: 'Publish AiSupportDesk.Functions'
+    inputs:
+      command: publish
+      projects: 'src/functions/AiSupportDesk.Functions.csproj'
+      arguments: '--configuration $(buildConfiguration) --no-build --output $(Build.ArtifactStagingDirectory)/AiSupportDesk.Functions'
+      zipAfterPublish: true
+      modifyOutputPath: true
+
+  # ── 7. Publish API App ────────────────────────────────────────────────────
+  - task: DotNetCoreCLI@2
+    displayName: 'Publish AiSupportDesk.Api'
+    inputs:
+      command: publish
+      projects: 'src/api/AiSupportDesk.Api.csproj'
+      arguments: '--configuration $(buildConfiguration) --no-build --output $(Build.ArtifactStagingDirectory)/AiSupportDesk.Api'
+      zipAfterPublish: true
+      modifyOutputPath: true
+
+  # ── 8. Build Frontend ───────────────────────────────────────────────────────
+  - task: NodeTool@0
+    displayName: 'Use Node.js 22.x'
+    inputs:
+      versionSpec: '22.x'
+
+  - script: npm ci
+    displayName: 'npm ci (frontend)'
+    workingDirectory: src/frontend
+
+  - script: npm run build
+    displayName: 'npm run build (frontend)'
+    workingDirectory: src/frontend
+
+  - task: CopyFiles@2
+    displayName: 'Copy frontend dist to staging'
+    inputs:
+      SourceFolder: 'src/frontend/dist'
+      Contents: '**'
+      TargetFolder: '$(Build.ArtifactStagingDirectory)/frontend-dist'
+
+  # ── 9. Copy deployment artefacts ──────────────────────────────────────────
+  - task: CopyFiles@2
+    displayName: 'Copy infra & scripts to staging'
+    inputs:
+      SourceFolder: '$(System.DefaultWorkingDirectory)'
+      Contents: |
+        infra/**
+        src/logicapp/**
+        scripts/**
+      TargetFolder: '$(Build.ArtifactStagingDirectory)'
+
+  # ── 10. Publish drop ─────────────────────────────────────────────────────
+  - task: PublishBuildArtifacts@1
+    displayName: 'Publish Artifact: drop'
+    inputs:
+      pathToPublish: '$(Build.ArtifactStagingDirectory)'
+      artifactName: 'drop'

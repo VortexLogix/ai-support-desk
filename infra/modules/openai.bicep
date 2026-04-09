@@ -1,12 +1,14 @@
 param location string
 param accountName string
 param deploymentName string
+param skuName string
+param deploymentCapacity int
 
 resource openAiAccount 'Microsoft.CognitiveServices/accounts@2024-04-01-preview' = {
   name: accountName
   location: location
   kind: 'OpenAI'
-  sku: { name: 'S0' }
+  sku: { name: skuName }
   properties: {
     customSubDomainName: accountName
     publicNetworkAccess: 'Enabled'
@@ -18,7 +20,7 @@ resource gpt4oDeployment 'Microsoft.CognitiveServices/accounts/deployments@2024-
   name: deploymentName
   sku: {
     name: 'Standard'
-    capacity: 10
+    capacity: deploymentCapacity
   }
   properties: {
     model: {
@@ -30,4 +32,5 @@ resource gpt4oDeployment 'Microsoft.CognitiveServices/accounts/deployments@2024-
 }
 
 output endpoint string = openAiAccount.properties.endpoint
-output key string = listKeys(openAiAccount.id, openAiAccount.apiVersion).key1
+#disable-next-line outputs-should-not-contain-secrets
+output key string = openAiAccount.listKeys().key1

@@ -7,11 +7,13 @@ param serviceBusConnectionString string
 @secure()
 param jwtSecret string
 param appInsightsConnectionString string
+param planSkuName string
+param planSkuTier string
 
 resource plan 'Microsoft.Web/serverfarms@2023-12-01' = {
   name: planName
   location: location
-  sku: { name: 'B1', tier: 'Basic' }
+  sku: { name: planSkuName, tier: planSkuTier }
   kind: 'linux'
   properties: { reserved: true }
 }
