@@ -1,10 +1,12 @@
 param location string
 param name string
+param skuName string
+param skuTier string
 
 resource staticWebApp 'Microsoft.Web/staticSites@2023-12-01' = {
   name: name
   location: location
-  sku: { name: 'Free', tier: 'Free' }
+  sku: { name: skuName, tier: skuTier }
   properties: {}
 }
 

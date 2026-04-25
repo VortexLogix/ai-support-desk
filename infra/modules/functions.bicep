@@ -10,18 +10,21 @@ param openAiEndpoint string
 param openAiKey string
 param openAiDeploymentName string
 param appInsightsConnectionString string
+param planSkuName string
+param planSkuTier string
+param storageSkuName string
 
 resource storageAccount 'Microsoft.Storage/storageAccounts@2023-05-01' = {
   name: storageAccountName
   location: location
-  sku: { name: 'Standard_LRS' }
+  sku: { name: storageSkuName }
   kind: 'StorageV2'
 }
 
 resource plan 'Microsoft.Web/serverfarms@2023-12-01' = {
   name: planName
   location: location
-  sku: { name: 'Y1', tier: 'Dynamic' }
+  sku: { name: planSkuName, tier: planSkuTier }
   kind: 'functionapp'
   properties: {}
 }

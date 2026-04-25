@@ -1,0 +1,86 @@
+# ══════════════════════════════════════════════════════════════════════════════
+# AiSupportDesk.CI.yml
+# CI pipeline — triggers on main branch push (deploys all to DEV)
+# Manual runs allow component selection
+# Stages: Build ▸ Deploy (DEV)
+# ══════════════════════════════════════════════════════════════════════════════
+
+trigger:
+  branches:
+    include:
+      - main
+
+parameters:
+  - name: deployInfra
+    displayName: 'Deploy Infrastructure (Bicep)'
+    type: boolean
+    default: true
+  - name: deployApi
+    displayName: 'Deploy API'
+    type: boolean
+    default: true
+  - name: deployFunctions
+    displayName: 'Deploy Functions'
+    type: boolean
+    default: true
+  - name: deployFrontend
+    displayName: 'Deploy Frontend'
+    type: boolean
+    default: true
+  - name: deleteAzureResources
+    displayName: 'Delete Azure Resources After Deploy'
+    type: string
+    default: 'No'
+    values:
+      - 'No'
+      - 'Yes'
+
+pool:
+  vmImage: 'windows-2022'
+
+variables:
+  solution: '**/AiSupportDesk.slnx'
+  buildPlatform: 'Any CPU'
+  buildConfiguration: 'Release'
+
+stages:
+
+  # ── Build ──────────────────────────────────────────────────────────────────
+  - stage: Build
+    displayName: Build
+    jobs:
+      - job: Build
+        displayName: 'Build'
+        steps:
+          - ${{ if not(or(parameters.deployInfra, parameters.deployApi, parameters.deployFunctions, parameters.deployFrontend)) }}:
+            - pwsh: |
+                Write-Error "At least one component must be selected for deployment."
+                exit 1
+              displayName: 'Validate: select at least one component'
+          - template: build/build-steps-template.yml
+
+  # ── Deploy to DEV ─────────────────────────────────────────────────────────
+  - stage: Deploy
+    displayName: Deploy (DEV)
+    dependsOn: Build
+    condition: succeeded()
+    jobs:
+      - deployment: Deploy
+        displayName: 'Deploy to DEV'
+        environment: AiSupportDesk-DEV
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - template: build/deploy-steps-template.yml
+                  parameters:
+                    taskAzureResourceManagerConnection: 'AzureServiceConnection'
+                    taskResourceGroupName: 'd-az1-aisd-rg'
+                    taskEnvironment: 'dev'
+                    sqlAdminPassword: '$(sqlAdminPassword)'
+                    jwtSecret: '$(jwtSecret)'
+                    deployInfra: ${{ parameters.deployInfra }}
+                    deployApi: ${{ parameters.deployApi }}
+                    deployFunctions: ${{ parameters.deployFunctions }}
+                    deployFrontend: ${{ parameters.deployFrontend }}
+                    deleteAzureResources: ${{ parameters.deleteAzureResources }}

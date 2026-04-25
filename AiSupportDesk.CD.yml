@@ -1,0 +1,176 @@
+# ══════════════════════════════════════════════════════════════════════════════
+# AiSupportDesk.CD.yml
+# CD pipeline — multi-stage release with stage & component selection
+# Manual trigger only
+#
+# ┌──────┐   ┌───────┐               ┌──────┐
+# │  QA  │   │  UAT  │──── gate ────▶ │ PROD │
+# └──┬───┘   └───┬───┘               └──────┘
+#    └────────────┘
+#       QA / UAT run in parallel after Build
+#       PROD depends on UAT when selected, otherwise on Build
+# ══════════════════════════════════════════════════════════════════════════════
+
+trigger: none
+
+parameters:
+  # ── Stage selection ──────────────────────────────────────────────────────
+  - name: deployToQA
+    displayName: 'Deploy to QA'
+    type: boolean
+    default: false
+  - name: deployToUAT
+    displayName: 'Deploy to UAT'
+    type: boolean
+    default: false
+  - name: deployToPROD
+    displayName: 'Deploy to PROD'
+    type: boolean
+    default: false
+  # ── Component selection ──────────────────────────────────────────────────
+  - name: deployInfra
+    displayName: 'Deploy Infrastructure (Bicep)'
+    type: boolean
+    default: false
+  - name: deployApi
+    displayName: 'Deploy API'
+    type: boolean
+    default: false
+  - name: deployFunctions
+    displayName: 'Deploy Functions'
+    type: boolean
+    default: false
+  - name: deployFrontend
+    displayName: 'Deploy Frontend'
+    type: boolean
+    default: false
+  # ── Options ──────────────────────────────────────────────────────────────
+  - name: deleteAzureResources
+    displayName: 'Delete Azure Resources After Deploy'
+    type: string
+    default: 'No'
+    values:
+      - 'No'
+      - 'Yes'
+
+pool:
+  vmImage: 'windows-2022'
+
+variables:
+  solution: '**/AiSupportDesk.slnx'
+  buildPlatform: 'Any CPU'
+  buildConfiguration: 'Release'
+
+stages:
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # BUILD
+  # ═══════════════════════════════════════════════════════════════════════════
+  - stage: Build
+    displayName: Build
+    jobs:
+      - job: Build
+        displayName: 'Build'
+        steps:
+          - ${{ if not(or(parameters.deployToQA, parameters.deployToUAT, parameters.deployToPROD)) }}:
+            - pwsh: |
+                Write-Error "At least one deployment stage (QA, UAT, PROD) must be selected."
+                exit 1
+              displayName: 'Validate: select at least one stage'
+          - ${{ if not(or(parameters.deployInfra, parameters.deployApi, parameters.deployFunctions, parameters.deployFrontend)) }}:
+            - pwsh: |
+                Write-Error "At least one component must be selected for deployment."
+                exit 1
+              displayName: 'Validate: select at least one component'
+          - template: build/build-steps-template.yml
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # QA  (depends on Build — runs in parallel with UAT)
+  # ═══════════════════════════════════════════════════════════════════════════
+  - ${{ if eq(parameters.deployToQA, true) }}:
+    - stage: qastage
+      displayName: QA
+      dependsOn: Build
+      condition: succeeded()
+      jobs:
+        - deployment: Deploy
+          displayName: 'Deploy to QA'
+          environment: AiSupportDesk-QA
+          strategy:
+            runOnce:
+              deploy:
+                steps:
+                  - template: build/deploy-steps-template.yml
+                    parameters:
+                      taskAzureResourceManagerConnection: 'AzureServiceConnection'
+                      taskResourceGroupName: 'q-az1-aisd-rg'
+                      taskEnvironment: 'qa'
+                      sqlAdminPassword: '$(sqlAdminPasswordNonProd)'
+                      jwtSecret: '$(jwtSecretNonProd)'
+                      deployInfra: ${{ parameters.deployInfra }}
+                      deployApi: ${{ parameters.deployApi }}
+                      deployFunctions: ${{ parameters.deployFunctions }}
+                      deployFrontend: ${{ parameters.deployFrontend }}
+                      deleteAzureResources: ${{ parameters.deleteAzureResources }}
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # UAT  (depends on Build — runs in parallel with QA)
+  # ═══════════════════════════════════════════════════════════════════════════
+  - ${{ if eq(parameters.deployToUAT, true) }}:
+    - stage: uatstage
+      displayName: UAT
+      dependsOn: Build
+      condition: succeeded()
+      jobs:
+        - deployment: Deploy
+          displayName: 'Deploy to UAT'
+          environment: AiSupportDesk-UAT
+          strategy:
+            runOnce:
+              deploy:
+                steps:
+                  - template: build/deploy-steps-template.yml
+                    parameters:
+                      taskAzureResourceManagerConnection: 'AzureServiceConnection'
+                      taskResourceGroupName: 'u-az1-aisd-rg'
+                      taskEnvironment: 'uat'
+                      sqlAdminPassword: '$(sqlAdminPasswordNonProd)'
+                      jwtSecret: '$(jwtSecretNonProd)'
+                      deployInfra: ${{ parameters.deployInfra }}
+                      deployApi: ${{ parameters.deployApi }}
+                      deployFunctions: ${{ parameters.deployFunctions }}
+                      deployFrontend: ${{ parameters.deployFrontend }}
+                      deleteAzureResources: ${{ parameters.deleteAzureResources }}
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # PROD  (gate before production)
+  #   → depends on UAT if UAT is selected, otherwise on Build
+  # ═══════════════════════════════════════════════════════════════════════════
+  - ${{ if eq(parameters.deployToPROD, true) }}:
+    - stage: prodstage
+      displayName: PROD
+      ${{ if eq(parameters.deployToUAT, true) }}:
+        dependsOn: uatstage
+      ${{ else }}:
+        dependsOn: Build
+      condition: succeeded()
+      jobs:
+        - deployment: Deploy
+          displayName: 'Deploy to PROD'
+          environment: AiSupportDesk-PROD
+          strategy:
+            runOnce:
+              deploy:
+                steps:
+                  - template: build/deploy-steps-template.yml
+                    parameters:
+                      taskAzureResourceManagerConnection: 'AzureServiceConnectionProd'
+                      taskResourceGroupName: 'p-az1-aisd-rg'
+                      taskEnvironment: 'prod'
+                      sqlAdminPassword: '$(sqlAdminPasswordProd)'
+                      jwtSecret: '$(jwtSecretProd)'
+                      deployInfra: ${{ parameters.deployInfra }}
+                      deployApi: ${{ parameters.deployApi }}
+                      deployFunctions: ${{ parameters.deployFunctions }}
+                      deployFrontend: ${{ parameters.deployFrontend }}
+                      deleteAzureResources: 'No'
