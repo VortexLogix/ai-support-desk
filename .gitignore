@@ -4,6 +4,7 @@ obj/
 *.user
 *.suo
 .vs/
+.vscode/
 
 # EF Migrations - keep the folder but ignore temp
 # (migrations are committed)
